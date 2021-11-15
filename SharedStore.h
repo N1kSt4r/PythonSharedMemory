@@ -22,7 +22,7 @@ class SharedStore {
 private:
     using ShTAllocType = sh::allocator<T, sh::managed_shared_memory::segment_manager>;
 
-    using CKeyType       = int;
+    using CKeyType       = size_t;
     using PyKeyType      = py::str;
     using CValueType     = std::vector<T, ShTAllocType>;
     using PyValueType    = np::ndarray;
@@ -43,6 +43,7 @@ public:
     ~SharedStore();
 
     void finalize();
+    size_t key2int(const PyKeyType&);
 
     // ToDo: use named mutex for sync and write method with dict/list
     void insert(const PyKeyType& key, PyValueType& value);
@@ -51,6 +52,7 @@ public:
 private:
     sh::managed_shared_memory _segment;
     sh::offset_ptr<StoreType> _store;
+    std::hash<std::string> _hasher;
     static bool _inited;
     std::string _name;
     bool _is_server;
@@ -102,22 +104,27 @@ void SharedStore<T>::finalize() {
 }
 
 template<class T>
-void SharedStore<T>::insert(const SharedStore::PyKeyType& key, SharedStore::PyValueType& value) {
-    int new_key = std::atoi(py::extract<const char*>(key));
+size_t SharedStore<T>::key2int(const PyKeyType& key) {
+    return _hasher(std::string(py::extract<const char*>(key)));
+}
 
-    if (!_store->count(new_key)) {
+template<class T>
+void SharedStore<T>::insert(const SharedStore::PyKeyType& key, SharedStore::PyValueType& value) {
+    auto c_key = key2int(key);
+
+    if (!_store->count(c_key)) {
         SharedStore::ShTAllocType sh_allocator(_segment.get_segment_manager());
-        _store->insert(std::make_pair(new_key, SharedStore::CValueType(value.shape(0), sh_allocator)));
+        _store->insert(std::make_pair(c_key, SharedStore::CValueType(value.shape(0), sh_allocator)));
     }
     
-    from_ndarray<T>(value, &_store->at(new_key));
+    from_ndarray<T>(value, &_store->at(c_key));
 }
 
 template<class T>
 typename SharedStore<T>::PyValueType SharedStore<T>::get(
         const SharedStore::PyKeyType& key, SharedStore<T>::PyValueType& output) {
-    int new_key = std::atoi(py::extract<const char*>(key));
-    from_vector(_store->at(new_key), &output);
+    auto c_key = key2int(key);
+    from_vector(_store->at(c_key), &output);
     return output;
 }
 
