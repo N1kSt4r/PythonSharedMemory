@@ -10,7 +10,9 @@ template<class T>
 py::class_<SharedStore<T>> register_store(const char* name) {
     return py::class_<SharedStore<T>>(name)
             .def( py::init<const char*, size_t, bool>(py::args("name", "size", "is_server")) )
+            .def( "insert_dict" , &SharedStore<T>::insert_dict, py::args("dict"))
             .def( "insert" , &SharedStore<T>::insert, py::args("key", "value"))
+            .def( "get_dict" , &SharedStore<T>::get_dict, py::args("dict"))
             .def( "get", &SharedStore<T>::get, py::args("key", "value"))
             .def( "finalize", &SharedStore<T>::finalize);
 }

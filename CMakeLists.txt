@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 project(PythonSharedMemory)
 
 set( CMAKE_CXX_STANDARD 14 )
-set( CMAKE_CXX_FLAGS " -pthread " )
+set( CMAKE_CXX_FLAGS " -pthread -O2 " )
 set( CMAKE_POSITION_INDEPENDENT_CODE ON )
 set( CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 

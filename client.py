@@ -5,13 +5,12 @@ import os
 meta = f'client {os.getpid()}:'
 
 import numpy as np
-data = np.ones(1920 * 1080 * 3, dtype=np.uint8)
+data = {str(i): np.ones(1920 * 1080 * 3, dtype=np.uint8) for i in range(9)}
 
 from time import time as now, sleep
 timestamps = [now()]
 for i in range(1000):
-    for j in range(9):
-        store.get(str(j), data)
+    store.get_dict(data)
     if len(timestamps) > 100:
         timestamps.pop(0)
     timestamps.append(now())

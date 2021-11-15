@@ -46,8 +46,11 @@ public:
     size_t key2int(const PyKeyType&);
 
     // ToDo: use named mutex for sync and write method with dict/list
-    void insert(const PyKeyType& key, PyValueType& value);
+    void insert(const PyKeyType& key, const PyValueType& value);
     PyValueType get(const PyKeyType& key, PyValueType& value);
+
+    void insert_dict(const py::dict& dict);
+    void get_dict(py::dict& dict);
 
 private:
     sh::managed_shared_memory _segment;
@@ -105,11 +108,11 @@ void SharedStore<T>::finalize() {
 
 template<class T>
 size_t SharedStore<T>::key2int(const PyKeyType& key) {
-    return _hasher(std::string(py::extract<const char*>(key)));
+    return _hasher(py::extract<std::string>(key));
 }
 
 template<class T>
-void SharedStore<T>::insert(const SharedStore::PyKeyType& key, SharedStore::PyValueType& value) {
+void SharedStore<T>::insert(const SharedStore::PyKeyType& key, const SharedStore::PyValueType& value) {
     auto c_key = key2int(key);
 
     if (!_store->count(c_key)) {
@@ -126,6 +129,28 @@ typename SharedStore<T>::PyValueType SharedStore<T>::get(
     auto c_key = key2int(key);
     from_vector(_store->at(c_key), &output);
     return output;
+}
+
+template<class T>
+void SharedStore<T>::insert_dict(const py::dict& dict) {
+    auto keys = dict.keys();
+    auto values = dict.values();
+    for (size_t i = 0; i < len(keys); ++i) {
+         py::str key = py::extract<py::str>(keys[i]);
+         np::ndarray value = py::extract<np::ndarray>(values[i]);
+         insert(key, value);
+    }
+}
+
+template<class T>
+void SharedStore<T>::get_dict(py::dict& dict) {
+    auto keys = dict.keys();
+    auto values = dict.values();
+    for (size_t i = 0; i < len(keys); ++i) {
+        py::str key = py::extract<py::str>(keys[i]);
+        np::ndarray value = py::extract<np::ndarray>(values[i]);
+        get(key, value);
+    }
 }
 
 template<class T> bool SharedStore<T>::_inited = false;
