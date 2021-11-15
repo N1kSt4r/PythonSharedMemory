@@ -42,6 +42,8 @@ public:
     SharedStore(const char* name, size_t size, bool is_server);
     ~SharedStore();
 
+    void finalize();
+
     // ToDo: use named mutex for sync and write method with dict/list
     void insert(const PyKeyType& key, PyValueType& value);
     PyValueType get(const PyKeyType& key, PyValueType& value);
@@ -89,6 +91,11 @@ SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
 
 template<class T>
 SharedStore<T>::~SharedStore<T>() {
+    finalize();
+}
+
+template<class T>
+void SharedStore<T>::finalize() {
     if (_is_server) {
         sh::shared_memory_object::remove(_name.c_str());
     }
