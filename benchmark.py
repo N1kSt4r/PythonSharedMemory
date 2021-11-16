@@ -18,4 +18,4 @@ def run(count_clients):
         client.join()
 
 
-run(1)
+run(15)

@@ -29,6 +29,14 @@ sh::named_mutex mutex(sh::open_or_create, "Check");
 sh::named_mutex init_store_lock(sh::open_or_create, "init_store_lock");
 
 
+struct SharedSync {
+    int read_count = 0;
+    sh::interprocess_mutex global_mutex;
+    sh::interprocess_mutex writer_mutex;
+    sh::interprocess_mutex reader_mutex;
+};
+
+
 template<class T>
 class SharedStore {
 private:
@@ -67,11 +75,9 @@ public:
     void get_dict(py::dict& dict);
 
 private:
-//    sh::offset_ptr<sh::interprocess_semaphore> _reader;
-//    sh::offset_ptr<sh::interprocess_mutex> _writer;
-
     sh::managed_shared_memory _segment;
     sh::offset_ptr<double> _timestamp;
+    sh::offset_ptr<SharedSync> _sync;
     sh::offset_ptr<StoreType> _store;
     std::hash<std::string> _hasher;
     static bool _inited;
@@ -111,9 +117,12 @@ SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
 
         _store = _segment.construct<StoreType>("store")(std::less<>(), sh_allocator);
         _timestamp = _segment.construct<double>("timestamp")(get_time());
+        _sync = _segment.construct<SharedSync>("sync")();
     } else {
         _segment = sh::managed_shared_memory(sh::open_or_create, name, size MB);
+
         _timestamp = _segment.find<double>("timestamp").first;
+        _sync = _segment.find<SharedSync>("sync").first;
         _store = _segment.find<StoreType>("store").first;
     }
 }
@@ -175,9 +184,9 @@ typename SharedStore<T>::PyValueType SharedStore<T>::get(
 
 template<class T>
 void SharedStore<T>::insert_dict(const py::dict& dict) {
-    sh::scoped_lock<sh::named_mutex> lock(mutex);
+    sh::scoped_lock<sh::interprocess_mutex> reader_lock(_sync->reader_mutex);
+    sh::scoped_lock<sh::interprocess_mutex> writer_lock(_sync->writer_mutex);
 
-    std::cout << "insert start" << std::endl;
     auto keys = dict.keys();
     auto values = dict.values();
     for (size_t i = 0; i < len(keys); ++i) {
@@ -185,17 +194,20 @@ void SharedStore<T>::insert_dict(const py::dict& dict) {
          np::ndarray value = py::extract<np::ndarray>(values[i]);
          insert(key, value);
     }
-    std::cout << "insert end" << std::endl;
 
     *_timestamp = get_time();
-    printf("set %lf %lf\n", *_timestamp, get_time());
 }
 
 template<class T>
 void SharedStore<T>::get_dict(py::dict& dict) {
-    sh::scoped_lock<sh::named_mutex> lock(mutex);
+    {
+        sh::scoped_lock<sh::interprocess_mutex> reader_lock(_sync->reader_mutex);
+        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
+        if (++_sync->read_count == 1) {
+            _sync->writer_mutex.lock();
+        }
+    }
 
-    std::cout << "get start" << std::endl;
     auto keys = dict.keys();
     auto values = dict.values();
     for (size_t i = 0; i < len(keys); ++i) {
@@ -203,10 +215,13 @@ void SharedStore<T>::get_dict(py::dict& dict) {
         np::ndarray value = py::extract<np::ndarray>(values[i]);
         get(key, value);
     }
-    std::cout << "get end" << std::endl;
 
-    std::cout << get_time() - *_timestamp << std::endl;
-    printf("get %lf %lf\n", *_timestamp, get_time());
+    {
+        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
+        if (--_sync->read_count == 0) {
+            _sync->writer_mutex.unlock();
+        }
+    }
 }
 
 template<class T> bool SharedStore<T>::_inited = false;
