@@ -6,7 +6,6 @@
 #include <boost/interprocess/sync/named_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
-#include <boost/interprocess/sync/interprocess_semaphore.hpp>
 
 #include <boost/interprocess/containers/map.hpp>
 #include <boost/interprocess/allocators/allocator.hpp>
@@ -16,16 +15,12 @@
 #include <vector>
 #include <string>
 
-#include <iostream>
-
-
 #define MB *1014*1024
 
 namespace py = boost::python;
 namespace np = boost::python::numpy;
 namespace sh = boost::interprocess;
 
-sh::named_mutex mutex(sh::open_or_create, "Check");
 sh::named_mutex init_store_lock(sh::open_or_create, "init_store_lock");
 
 
@@ -65,9 +60,8 @@ public:
     void finalize();
     double get_time();
     size_t key2int(const PyKeyType&);
-//    void active_wait(const PyKeyType&);
+    void active_wait(const PyKeyType&);
 
-    // ToDo: use named mutex for sync and write method with dict/list
     void insert(const PyKeyType& key, const PyValueType& value);
     PyValueType get(const PyKeyType& key, PyValueType& value);
 
@@ -75,6 +69,10 @@ public:
     void get_dict(py::dict& dict);
 
 private:
+    const double _max_timestamp_diff = 5;
+    const int _active_wait_attempts = 5;
+    const int _active_wait_secs = 15;
+
     sh::managed_shared_memory _segment;
     sh::offset_ptr<double> _timestamp;
     sh::offset_ptr<SharedSync> _sync;
@@ -83,9 +81,6 @@ private:
     static bool _inited;
     std::string _name;
     bool _is_server;
-
-//    int _active_wait_attempts;
-//    int _active_wait_secs;
 };
 
 
@@ -122,8 +117,8 @@ SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
         _segment = sh::managed_shared_memory(sh::open_or_create, name, size MB);
 
         _timestamp = _segment.find<double>("timestamp").first;
-        _sync = _segment.find<SharedSync>("sync").first;
         _store = _segment.find<StoreType>("store").first;
+        _sync = _segment.find<SharedSync>("sync").first;
     }
 }
 
@@ -144,17 +139,17 @@ size_t SharedStore<T>::key2int(const PyKeyType& key) {
     return _hasher(py::extract<std::string>(key));
 }
 
-//template<class T>
-//void SharedStore<T>::active_wait(const PyKeyType& key) {
-//    auto c_key = key2int(key);
-//    for (int i = 0; i < _active_wait_attempts; ++i) {
-//        if (_store->count(c_key)) {
-//            return;
-//        }
-//        sleep(_active_wait_secs);
-//    }
-//    throw std::runtime_error("Key not found");
-//}
+template<class T>
+void SharedStore<T>::active_wait(const PyKeyType& key) {
+   auto c_key = key2int(key);
+   for (int i = 0; i < _active_wait_attempts; ++i) {
+       if (_store->count(c_key)) {
+           return;
+       }
+       sleep(_active_wait_secs);
+   }
+   throw std::runtime_error("Key not found");
+}
 
 template<class T>
 double SharedStore<T>::get_time() {
@@ -177,8 +172,7 @@ void SharedStore<T>::insert(const SharedStore::PyKeyType& key, const SharedStore
 template<class T>
 typename SharedStore<T>::PyValueType SharedStore<T>::get(
         const SharedStore::PyKeyType& key, SharedStore<T>::PyValueType& output) {
-    auto c_key = key2int(key);
-    from_vector(_store->at(c_key), &output);
+    from_vector(_store->at(key2int(key)), &output);
     return output;
 }
 
@@ -206,6 +200,10 @@ void SharedStore<T>::get_dict(py::dict& dict) {
         if (++_sync->read_count == 1) {
             _sync->writer_mutex.lock();
         }
+    }
+
+    if (get_time() - *_timestamp > _max_timestamp_diff) {
+        throw std::runtime_error("Too old last update");
     }
 
     auto keys = dict.keys();
