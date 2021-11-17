@@ -6,8 +6,8 @@ meta = f'server {os.getpid()}:'
 
 import numpy as np
 
-data = {str(i): np.ones(1920 * 1080 * 3, dtype=np.uint8) for i in range(9)}
-print(data)
+data = {str(i): np.ones((1920, 1080, 3), dtype=np.uint8) for i in range(9)}
+# print(data)
 
 from time import time as now, sleep
 class Locker:
@@ -29,7 +29,7 @@ class Locker:
 from time import time as now
 timestamps = [now()]
 locker = Locker(0.1)
-for i in range(100):
+for i in range(1200):
     locker.wait()
     write_start = now()
     store.insert_dict(data)

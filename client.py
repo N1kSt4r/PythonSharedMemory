@@ -5,7 +5,7 @@ import os
 meta = f'client {os.getpid()}:'
 
 import numpy as np
-data = {str(i): np.ones(1920 * 1080 * 3, dtype=np.uint8) for i in range(9)}
+data = {str(i): np.ones((1920, 1080, 3), dtype=np.uint8) for i in range(9)}
 
 from time import time as now, sleep
 class Locker:
@@ -27,7 +27,7 @@ class Locker:
 from time import time as now, sleep
 locker = Locker(0.1)
 timestamps = [now()]
-for i in range(50):
+for i in range(1000):
     locker.wait()
     read_start = now()
     store.get_dict(data)

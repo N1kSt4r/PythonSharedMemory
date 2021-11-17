@@ -84,16 +84,23 @@ private:
 };
 
 
+size_t get_size(const np::ndarray& ndarray) {
+    return py::extract<size_t>(ndarray.attr("size"));
+}
+
+#include <iostream>
 template<class T, class A>
 void from_vector(const std::vector<T, A>& vector, np::ndarray* ndarray) {
-    assert(vector.size() == ndarray->shape(0));
+    assert(ndarray->get_flags() & np::ndarray::bitflag::C_CONTIGUOUS);
+    assert(vector.size() == get_size(*ndarray));
     memcpy(ndarray->get_data(), vector.data(), vector.size() * sizeof(T));
 }
 
 template<class T, class A>
 void from_ndarray(const np::ndarray& ndarray, std::vector<T, A>* vector) {
-    assert(vector->size() == ndarray.shape(0));
-    memcpy(vector->data(), ndarray.get_data(), ndarray.shape(0) * sizeof(T));
+    assert(ndarray.get_flags() & np::ndarray::bitflag::C_CONTIGUOUS);
+    assert(vector->size() == get_size(ndarray));
+    memcpy(vector->data(), ndarray.get_data(), vector->size() * sizeof(T));
 }
 
 template<class T>
@@ -158,20 +165,19 @@ double SharedStore<T>::get_time() {
 }
 
 template<class T>
-void SharedStore<T>::insert(const SharedStore::PyKeyType& key, const SharedStore::PyValueType& value) {
+void SharedStore<T>::insert(const PyKeyType& key, const PyValueType& value) {
     auto c_key = key2int(key);
 
     if (!_store->count(c_key)) {
         SharedStore::ShTAllocType sh_allocator(_segment.get_segment_manager());
-        _store->insert(std::make_pair(c_key, SharedStore::CValueType(value.shape(0), sh_allocator)));
+        _store->insert(std::make_pair(c_key, SharedStore::CValueType(get_size(value), sh_allocator)));
     }
     
     from_ndarray<T>(value, &_store->at(c_key));
 }
 
 template<class T>
-typename SharedStore<T>::PyValueType SharedStore<T>::get(
-        const SharedStore::PyKeyType& key, SharedStore<T>::PyValueType& output) {
+typename SharedStore<T>::PyValueType SharedStore<T>::get(const PyKeyType& key, PyValueType& output) {
     from_vector(_store->at(key2int(key)), &output);
     return output;
 }
