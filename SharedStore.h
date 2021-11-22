@@ -63,15 +63,15 @@ public:
     void active_wait(const PyKeyType&);
 
     void insert(const PyKeyType& key, const PyValueType& value);
-    PyValueType get(const PyKeyType& key, PyValueType& value);
+    PyValueType get(const PyKeyType& key, PyValueType& output);
 
     void insert_dict(const py::dict& dict);
     void get_dict(py::dict& dict);
 
 private:
     const double _max_timestamp_diff = 5;
-    const int _active_wait_attempts = 5;
-    const int _active_wait_secs = 15;
+    const int _wait_secs = 5;
+    const int _attempts = 5;
 
     sh::managed_shared_memory _segment;
     sh::offset_ptr<double> _timestamp;
@@ -105,27 +105,38 @@ void from_ndarray(const np::ndarray& ndarray, std::vector<T, A>* vector) {
 
 template<class T>
 SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
-    sh::scoped_lock<sh::named_mutex> lock(init_store_lock);
+    for (int ntry = 0; ; ++ntry) {
+        try {
+            sh::scoped_lock<sh::named_mutex> lock(init_store_lock);
+            if (is_server) {
+                sh::shared_memory_object::remove(name);
+                _segment = sh::managed_shared_memory(sh::create_only, name, size MB);
+                ShMapAllocType sh_allocator(_segment.get_segment_manager());
 
-    _is_server = is_server;
-    assert(not _inited);
-    _inited = true;
-    _name = name;
+                _store = _segment.construct<StoreType>("store")(std::less<>(), sh_allocator);
+                _timestamp = _segment.construct<double>("timestamp")(get_time());
+                _sync = _segment.construct<SharedSync>("sync")();
+            } else {
+                _segment = sh::managed_shared_memory(sh::open_only, name);
 
-    if (is_server) {
-        sh::shared_memory_object::remove(name);
-        _segment = sh::managed_shared_memory(sh::create_only, name, size MB);
-        ShMapAllocType sh_allocator(_segment.get_segment_manager());
+                _timestamp = _segment.find<double>("timestamp").first;
+                _store = _segment.find<StoreType>("store").first;
+                _sync = _segment.find<SharedSync>("sync").first;
+            }
 
-        _store = _segment.construct<StoreType>("store")(std::less<>(), sh_allocator);
-        _timestamp = _segment.construct<double>("timestamp")(get_time());
-        _sync = _segment.construct<SharedSync>("sync")();
-    } else {
-        _segment = sh::managed_shared_memory(sh::open_or_create, name, size MB);
-
-        _timestamp = _segment.find<double>("timestamp").first;
-        _store = _segment.find<StoreType>("store").first;
-        _sync = _segment.find<SharedSync>("sync").first;
+            _is_server = is_server;
+            assert(not _inited);
+            _inited = true;
+            _name = name;
+            break;
+        } catch (std::exception& exc) {
+            if (ntry >= _attempts) {
+                throw std::runtime_error(exc.what());
+            } else {
+                std::cout << name << ": " << exc.what() << std::endl;
+                sleep(_wait_secs);
+            }
+        }
     }
 }
 
@@ -149,11 +160,11 @@ size_t SharedStore<T>::key2int(const PyKeyType& key) {
 template<class T>
 void SharedStore<T>::active_wait(const PyKeyType& key) {
    auto c_key = key2int(key);
-   for (int i = 0; i < _active_wait_attempts; ++i) {
+   for (int i = 0; i < _attempts; ++i) {
        if (_store->count(c_key)) {
            return;
        }
-       sleep(_active_wait_secs);
+       sleep(_wait_secs);
    }
    throw std::runtime_error("Key not found");
 }

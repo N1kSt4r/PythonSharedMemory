@@ -1,12 +1,12 @@
 from shared_tools import SharedStore_uint8
-store = SharedStore_uint8("check", 400, True)
+store = SharedStore_uint8("check", 100, True)
 
 import os
 meta = f'server {os.getpid()}:'
 
 import numpy as np
 
-data = {str(i): np.ones((1920, 1080, 3), dtype=np.uint8) for i in range(9)}
+data = {str(i): np.ones((1920, 1080, 3), dtype=np.uint8) for i in range(11)}
 # print(data)
 
 from time import time as now, sleep
@@ -29,14 +29,14 @@ class Locker:
 from time import time as now
 timestamps = [now()]
 locker = Locker(0.1)
-for i in range(1200):
+for i in range(150):
     locker.wait()
     write_start = now()
     store.insert_dict(data)
+    write_end = now()
     if len(timestamps) > 100:
         timestamps.pop(0)
-    write_end = now()
-    timestamps.append(write_end)
+    timestamps.append(now())
     print(meta, (timestamps[-1] - timestamps[0]) / 100, write_end - write_start)
 
 store.finalize()
