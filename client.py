@@ -1,5 +1,5 @@
 from shared_tools import SharedStore_uint8
-store = SharedStore_uint8("check", -1, False)
+store = SharedStore_uint8("check", 0, False)
 
 import os
 meta = f'client {os.getpid()}:'
