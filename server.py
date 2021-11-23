@@ -1,4 +1,4 @@
-from shared_tools import SharedStore_uint8
+from shared_store import SharedStore_uint8
 store = SharedStore_uint8("check", 100, True)
 
 import os

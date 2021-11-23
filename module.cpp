@@ -17,7 +17,7 @@ py::class_<SharedStore<T>> register_store(const char* name) {
             .def( "finalize", &SharedStore<T>::finalize);
 }
 
-BOOST_PYTHON_MODULE( shared_tools ) {
+BOOST_PYTHON_MODULE( shared_store ) {
     Py_Initialize();
     np::initialize();
 

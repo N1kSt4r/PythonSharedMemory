@@ -7,7 +7,7 @@ set( CMAKE_POSITION_INDEPENDENT_CODE ON )
 set( CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 
 
-find_package( Python3 3.6 EXACT COMPONENTS Interpreter Development NumPy REQUIRED )
+find_package( Python3 COMPONENTS Interpreter Development NumPy REQUIRED )
 message( STATUS "Python: " ${Python3_EXECUTABLE} )
 message( STATUS "        " ${Python3_INCLUDE_DIRS} )
 message( STATUS "        " ${Python3_LIBRARIES} )
@@ -28,14 +28,14 @@ include_directories( ${Boost_INCLUDE_DIR} )
 add_definitions( ${Boost_DEFINITIONS} )
 
 
-add_library( shared_tools SHARED module.cpp )
+add_library( shared_store SHARED module.cpp )
 
 
-target_link_libraries( shared_tools ${Boost_LIBRARIES} ${Python3_LIBRARIES} librt.so )
-target_include_directories( shared_tools PRIVATE ${Python3_INCLUDE_DIRS} )
-set_target_properties( shared_tools PROPERTIES PREFIX "" )
-set_target_properties( shared_tools PROPERTIES SUFFIX ".so" )
+target_link_libraries( shared_store ${Boost_LIBRARIES} ${Python3_LIBRARIES} librt.so )
+target_include_directories( shared_store PRIVATE ${Python3_INCLUDE_DIRS} )
+set_target_properties( shared_store PROPERTIES PREFIX "" )
+set_target_properties( shared_store PROPERTIES SUFFIX ".so" )
 
 
 add_executable( exe main.cpp )
-target_link_libraries( exe shared_tools )
+target_link_libraries( exe shared_store )

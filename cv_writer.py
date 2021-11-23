@@ -1,4 +1,4 @@
-from shared_tools import SharedStore_uint8
+from shared_store import SharedStore_uint8
 from time import sleep
 import numpy as np
 
