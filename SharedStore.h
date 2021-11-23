@@ -14,6 +14,7 @@
 #include <chrono>
 #include <vector>
 #include <string>
+#include <iostream>
 
 #define MB *1014*1024
 
@@ -88,7 +89,6 @@ size_t get_size(const np::ndarray& ndarray) {
     return py::extract<size_t>(ndarray.attr("size"));
 }
 
-#include <iostream>
 template<class T, class A>
 void from_vector(const std::vector<T, A>& vector, np::ndarray* ndarray) {
     assert(ndarray->get_flags() & np::ndarray::bitflag::C_CONTIGUOUS);
