@@ -28,7 +28,7 @@ include_directories( ${Boost_INCLUDE_DIR} )
 add_definitions( ${Boost_DEFINITIONS} )
 
 
-add_library( shared_store SHARED module.cpp )
+add_library( shared_store SHARED sources/module.cpp)
 
 
 target_link_libraries( shared_store ${Boost_LIBRARIES} ${Python3_LIBRARIES} librt.so )
@@ -37,5 +37,5 @@ set_target_properties( shared_store PROPERTIES PREFIX "" )
 set_target_properties( shared_store PROPERTIES SUFFIX ".so" )
 
 
-add_executable( exe main.cpp )
+add_executable( exe sources/main.cpp)
 target_link_libraries( exe shared_store )
