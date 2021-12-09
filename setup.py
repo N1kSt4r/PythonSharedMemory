@@ -38,7 +38,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name='shared_store',
-    version='1.0.0',
+    version='1.0.1',
     packages=find_packages(),
     author='n1kst4r',
     python_requires='>=3.6',

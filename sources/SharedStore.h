@@ -16,7 +16,7 @@
 #include <string>
 #include <iostream>
 
-#define MB *1014*1024
+#define MB *1024*1024
 
 namespace py = boost::python;
 namespace np = boost::python::numpy;
@@ -33,19 +33,51 @@ struct SharedSync {
 };
 
 
+class ReaderLock {
+public:
+    ReaderLock(SharedSync* sync) {
+        _sync = sync;
+
+        sh::scoped_lock<sh::interprocess_mutex> reader_lock(_sync->reader_mutex);
+        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
+        if (++_sync->read_count == 1) {
+            _sync->writer_mutex.lock();
+        }
+    }
+
+    ~ReaderLock() {
+        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
+        if (--_sync->read_count == 0) {
+            _sync->writer_mutex.unlock();
+        }
+    }
+
+private:
+    SharedSync* _sync;
+};
+
+
 template<class T>
 class SharedStore {
 private:
     using ShTAllocType = sh::allocator<T, sh::managed_shared_memory::segment_manager>;
 
-    using CKeyType       = size_t;
-    using PyKeyType      = py::str;
-    using CValueType     = std::vector<T, ShTAllocType>;
-    using PyValueType    = np::ndarray;
+    static const size_t max_dim = 3;
 
-    using MapPairType    = std::pair<const CKeyType, CValueType>;
+    using PyKeyType      = py::str;
+    using PyValueType    = np::ndarray;
+    using ShapeType      = std::array<size_t, max_dim + 1>;
+
+    using CKeyType       = size_t;
+    using CValueType     = std::vector<T, ShTAllocType>;
+    using CValuePairType = std::pair<ShapeType, CValueType>;
+
+    using MapPairType    = std::pair<const CKeyType, CValuePairType>;
     using ShMapAllocType = sh::allocator<MapPairType, sh::managed_shared_memory::segment_manager>;
-    using StoreType      = sh::map<CKeyType, CValueType , std::less<>, ShMapAllocType>;
+    using StoreType      = sh::map<CKeyType, CValuePairType, std::less<>, ShMapAllocType>;
+
+    ShapeType pyshape2cshape(const np::ndarray& array);
+    py::tuple cshape2pyshape(const ShapeType& shape);
 
 public:
     SharedStore() {
@@ -66,8 +98,12 @@ public:
     void insert(const PyKeyType& key, const PyValueType& value);
     PyValueType get(const PyKeyType& key, PyValueType& output);
 
+    template<bool is_init>
+    void get_dict_meta(py::dict& dict);
     void insert_dict(const py::dict& dict);
-    void get_dict(py::dict& dict);
+
+    auto& __enter__();
+    void __exit__(const py::object& a, const py::object& c, const py::object& d);
 
 private:
     const double _max_timestamp_diff = 5;
@@ -105,7 +141,7 @@ void from_ndarray(const np::ndarray& ndarray, std::vector<T, A>* vector) {
 
 template<class T>
 SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
-    for (int ntry = 0; ; ++ntry) {
+    for (int ntry = 0; ntry < _attempts; ++ntry) {
         try {
             sh::scoped_lock<sh::named_mutex> lock(init_store_lock);
             if (is_server) {
@@ -181,15 +217,17 @@ void SharedStore<T>::insert(const PyKeyType& key, const PyValueType& value) {
 
     if (!_store->count(c_key)) {
         SharedStore::ShTAllocType sh_allocator(_segment.get_segment_manager());
-        _store->insert(std::make_pair(c_key, SharedStore::CValueType(get_size(value), sh_allocator)));
+        CValueType c_value(get_size(value), sh_allocator);
+        CValuePairType value_pair = std::make_pair(pyshape2cshape(value), c_value);
+        _store->insert(std::make_pair(c_key, value_pair));
     }
     
-    from_ndarray<T>(value, &_store->at(c_key));
+    from_ndarray<T>(value, &_store->at(c_key).second);
 }
 
 template<class T>
 typename SharedStore<T>::PyValueType SharedStore<T>::get(const PyKeyType& key, PyValueType& output) {
-    from_vector(_store->at(key2int(key)), &output);
+    from_vector(_store->at(key2int(key)).second, &output);
     return output;
 }
 
@@ -210,14 +248,9 @@ void SharedStore<T>::insert_dict(const py::dict& dict) {
 }
 
 template<class T>
-void SharedStore<T>::get_dict(py::dict& dict) {
-    {
-        sh::scoped_lock<sh::interprocess_mutex> reader_lock(_sync->reader_mutex);
-        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
-        if (++_sync->read_count == 1) {
-            _sync->writer_mutex.lock();
-        }
-    }
+template<bool is_init>
+void SharedStore<T>::get_dict_meta(py::dict& dict) {
+    ReaderLock(_sync.get());
 
     if (get_time() - *_timestamp > _max_timestamp_diff) {
         throw std::runtime_error("Too old last update");
@@ -226,17 +259,50 @@ void SharedStore<T>::get_dict(py::dict& dict) {
     auto keys = dict.keys();
     auto values = dict.values();
     for (size_t i = 0; i < len(keys); ++i) {
-        py::str key = py::extract<py::str>(keys[i]);
-        np::ndarray value = py::extract<np::ndarray>(values[i]);
-        get(key, value);
-    }
-
-    {
-        sh::scoped_lock<sh::interprocess_mutex> global_lock(_sync->global_mutex);
-        if (--_sync->read_count == 0) {
-            _sync->writer_mutex.unlock();
+        PyKeyType key = py::extract<py::str>(keys[i]);
+        if constexpr (is_init) {
+            active_wait(key);
+            py::tuple shape = cshape2pyshape(_store->at(key2int(key)).first);
+            np::dtype type = np::dtype::get_builtin<T>();
+            PyValueType value = np::empty(shape, type);
+            dict[key] = value;
+            get(key, value);
+        } else {
+            PyValueType value = py::extract<PyValueType>(values[i]);
+            get(key, value);
         }
     }
+}
+
+template<class T>
+typename SharedStore<T>::ShapeType SharedStore<T>::pyshape2cshape(const np::ndarray& array) {
+    size_t dims = array.get_nd();
+    assert(dims <= max_dim);
+    ShapeType shape;
+
+    shape[0] = dims;
+    for (int i = 0; i < dims; ++i) {
+        shape[i + 1] = array.shape(i);
+    }
+    return shape;
+}
+
+template<class T>
+py::tuple SharedStore<T>::cshape2pyshape(const ShapeType& shape) {
+    py::list pyshape;
+    for (int i = 0; i < shape[0]; ++i) {
+        pyshape.append(shape[i + 1]);
+    }
+    return py::tuple(pyshape);
+}
+
+template<class T>
+auto& SharedStore<T>::__enter__() {
+    return *this;
+}
+template<class T>
+void SharedStore<T>::__exit__(const py::object& a, const py::object& c, const py::object& d) {
+    finalize();
 }
 
 template<class T> bool SharedStore<T>::_inited = false;
