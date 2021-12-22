@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <unordered_set>
 
 #define MB *1024*1024
 
@@ -23,6 +24,7 @@ namespace np = boost::python::numpy;
 namespace sh = boost::interprocess;
 
 sh::named_mutex init_store_lock(sh::open_or_create, "init_store_lock");
+std::unordered_set<std::string> _inited;
 
 
 struct SharedSync {
@@ -115,7 +117,6 @@ private:
     sh::offset_ptr<SharedSync> _sync;
     sh::offset_ptr<StoreType> _store;
     std::hash<std::string> _hasher;
-    static bool _inited;
     std::string _name;
     bool _is_server;
 };
@@ -144,6 +145,10 @@ SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
     for (int ntry = 0; ntry < _attempts; ++ntry) {
         try {
             sh::scoped_lock<sh::named_mutex> lock(init_store_lock);
+            if (_inited.count(name)) {
+                std::cout << "\x1b[31mWarning: double init " << name << " store\x1b[0m" << std::endl;
+            }
+
             if (is_server) {
                 sh::shared_memory_object::remove(name);
                 _segment = sh::managed_shared_memory(sh::create_only, name, size MB);
@@ -161,8 +166,7 @@ SharedStore<T>::SharedStore(const char* name, size_t size, bool is_server) {
             }
 
             _is_server = is_server;
-            assert(not _inited);
-            _inited = true;
+            _inited.insert(name);
             _name = name;
             break;
         } catch (std::exception& exc) {
@@ -304,5 +308,3 @@ template<class T>
 void SharedStore<T>::__exit__(const py::object& a, const py::object& c, const py::object& d) {
     finalize();
 }
-
-template<class T> bool SharedStore<T>::_inited = false;
