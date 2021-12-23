@@ -24,6 +24,5 @@ BOOST_PYTHON_MODULE( shared_store ) {
     np::initialize();
 
     register_store<uint8_t>("SharedStore_uint8");
-    register_store<uint16_t>("SharedStore_fp16");
-    register_store<uint32_t>("SharedStore_fp32");
+    register_store<float>("SharedStore_fp32");
 }
